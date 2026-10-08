@@ -1,14 +1,5 @@
 name: infrastructure-masternode
 
-x-authentik-environment: &authentik-environment
-  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?Set AUTHENTIK_SECRET_KEY in .env}
-  AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-  AUTHENTIK_POSTGRESQL__HOST: postgresql
-  AUTHENTIK_POSTGRESQL__NAME: authentik
-  AUTHENTIK_POSTGRESQL__USER: authentik
-  AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:?Set AUTHENTIK_POSTGRES_PASSWORD in .env}
-  AUTHENTIK_REDIS__HOST: redis
-
 services:
   snapotter:
     image: snapotter/snapotter:latest
@@ -64,110 +55,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-
-  plex:
-    image: lscr.io/linuxserver/plex:latest
-    container_name: plex
-    restart: unless-stopped
-    environment:
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
-      TZ: ${TZ:-Etc/UTC}
-      VERSION: docker
-      PLEX_CLAIM: ${PLEX_CLAIM:-}
-    ports:
-      - "32400:32400"
-    volumes:
-      - plex_config:/config
-      - plex_transcode:/transcode
-      - ../files/plex/media:/media
-
-  silverbullet:
-    image: zefhemel/silverbullet:latest
-    container_name: silverbullet
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - silverbullet_space:/space
-
-  authentik-postgresql:
-    image: docker.io/library/postgres:16-alpine
-    container_name: authentik-postgresql
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: authentik
-      POSTGRES_USER: authentik
-      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:?Set AUTHENTIK_POSTGRES_PASSWORD in .env}
-    volumes:
-      - authentik_postgresql:/var/lib/postgresql/data
-    networks:
-      authentik:
-        aliases:
-          - postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  authentik-redis:
-    image: docker.io/library/redis:alpine
-    container_name: authentik-redis
-    restart: unless-stopped
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
-    volumes:
-      - authentik_redis:/data
-    networks:
-      authentik:
-        aliases:
-          - redis
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  authentik-server:
-    image: ghcr.io/goauthentik/server:latest
-    container_name: authentik-server
-    restart: unless-stopped
-    command: server
-    environment:
-      <<: *authentik-environment
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@example.com}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
-    ports:
-      - "9000:9000"
-      - "9443:9443"
-    volumes:
-      - authentik_media:/media
-      - authentik_templates:/templates
-    networks:
-      - authentik
-    depends_on:
-      authentik-postgresql:
-        condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
-
-  authentik-worker:
-    image: ghcr.io/goauthentik/server:latest
-    container_name: authentik-worker
-    restart: unless-stopped
-    command: worker
-    environment: *authentik-environment
-    volumes:
-      - authentik_media:/media
-      - authentik_templates:/templates
-    networks:
-      - authentik
-    depends_on:
-      authentik-postgresql:
-        condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
 
   termix:
     image: ghcr.io/lukegus/termix:latest
@@ -234,7 +121,6 @@ services:
 
 networks:
   snapotter:
-  authentik:
   termix:
 
 volumes:
@@ -250,14 +136,6 @@ volumes:
     name: plex-transcode
   silverbullet_space:
     name: silverbullet-space
-  authentik_postgresql:
-    name: authentik-postgresql-data
-  authentik_redis:
-    name: authentik-redis-data
-  authentik_media:
-    name: authentik-media
-  authentik_templates:
-    name: authentik-templates
   termix_data:
     name: termix-data
   n8n_data:
