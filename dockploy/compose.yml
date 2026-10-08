@@ -1,6 +1,6 @@
 services:
   dockploy:
-    image: dockploy/dockploy:latest
+    image: dokploy/dokploy:latest
     container_name: dockploy
     restart: unless-stopped
     ports:
