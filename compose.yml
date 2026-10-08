@@ -1,0 +1,280 @@
+name: infrastructure-masternode
+
+x-authentik-environment: &authentik-environment
+  AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:?Set AUTHENTIK_SECRET_KEY in .env}
+  AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+  AUTHENTIK_POSTGRESQL__HOST: postgresql
+  AUTHENTIK_POSTGRESQL__NAME: authentik
+  AUTHENTIK_POSTGRESQL__USER: authentik
+  AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:?Set AUTHENTIK_POSTGRES_PASSWORD in .env}
+  AUTHENTIK_REDIS__HOST: redis
+
+services:
+  snapotter:
+    image: snapotter/snapotter:latest
+    container_name: snapotter
+    restart: unless-stopped
+    ports:
+      - "1349:1349"
+    environment:
+      DATABASE_URL: postgres://snapotter:${SNAPOTTER_POSTGRES_PASSWORD:?Set SNAPOTTER_POSTGRES_PASSWORD in .env}@postgres:5432/snapotter
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - snapotter_data:/data
+    networks:
+      - snapotter
+    depends_on:
+      snapotter-postgres:
+        condition: service_healthy
+      snapotter-redis:
+        condition: service_healthy
+
+  snapotter-postgres:
+    image: postgres:17-alpine
+    container_name: snapotter-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: snapotter
+      POSTGRES_PASSWORD: ${SNAPOTTER_POSTGRES_PASSWORD:?Set SNAPOTTER_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: snapotter
+    volumes:
+      - snapotter_pgdata:/var/lib/postgresql/data
+    networks:
+      snapotter:
+        aliases:
+          - postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snapotter -d snapotter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  snapotter-redis:
+    image: redis:8-alpine
+    container_name: snapotter-redis
+    restart: unless-stopped
+    volumes:
+      - snapotter_redisdata:/data
+    networks:
+      snapotter:
+        aliases:
+          - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+      VERSION: docker
+      PLEX_CLAIM: ${PLEX_CLAIM:-}
+    ports:
+      - "32400:32400"
+    volumes:
+      - plex_config:/config
+      - plex_transcode:/transcode
+      - ../files/plex/media:/media
+
+  silverbullet:
+    image: zefhemel/silverbullet:latest
+    container_name: silverbullet
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - silverbullet_space:/space
+
+  authentik-postgresql:
+    image: docker.io/library/postgres:16-alpine
+    container_name: authentik-postgresql
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRES_PASSWORD:?Set AUTHENTIK_POSTGRES_PASSWORD in .env}
+    volumes:
+      - authentik_postgresql:/var/lib/postgresql/data
+    networks:
+      authentik:
+        aliases:
+          - postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  authentik-redis:
+    image: docker.io/library/redis:alpine
+    container_name: authentik-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - authentik_redis:/data
+    networks:
+      authentik:
+        aliases:
+          - redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    environment:
+      <<: *authentik-environment
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@example.com}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - authentik
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    environment: *authentik-environment
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - authentik
+    depends_on:
+      authentik-postgresql:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+
+  portainer:
+    image: portainer/portainer-ce:2.45.0
+    container_name: portainer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    ports:
+      - "8110:9000"
+
+  termix:
+    image: ghcr.io/lukegus/termix:latest
+    container_name: termix
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+    volumes:
+      - termix_data:/app/data
+    networks:
+      - termix
+    depends_on:
+      - termix-guacd
+
+  termix-guacd:
+    image: guacamole/guacd:1.6.0
+    container_name: termix-guacd
+    restart: unless-stopped
+    networks:
+      termix:
+        aliases:
+          - guacd
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_HOST: ${N8N_HOST:?Set N8N_HOST in .env}
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      WEBHOOK_URL: ${WEBHOOK_URL:?Set WEBHOOK_URL in .env}
+      TZ: ${TZ:-Etc/UTC}
+      GENERIC_TIMEZONE: ${TZ:-Etc/UTC}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  hermes:
+    image: nousresearch/hermes-agent:latest
+    container_name: hermes
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "8642:8642"
+      - "9119:9119"
+    volumes:
+      - hermes_data:/opt/data
+    environment:
+      HERMES_DASHBOARD: "1"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_KEY: ${API_SERVER_KEY:-}
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+
+networks:
+  snapotter:
+  authentik:
+  termix:
+
+volumes:
+  snapotter_data:
+    name: snapotter-data
+  snapotter_pgdata:
+    name: snapotter-pgdata
+  snapotter_redisdata:
+    name: snapotter-redisdata
+  plex_config:
+    name: plex-config
+  plex_transcode:
+    name: plex-transcode
+  silverbullet_space:
+    name: silverbullet-space
+  authentik_postgresql:
+    name: authentik-postgresql-data
+  authentik_redis:
+    name: authentik-redis-data
+  authentik_media:
+    name: authentik-media
+  authentik_templates:
+    name: authentik-templates
+  portainer_data:
+    name: portainer-data
+  termix_data:
+    name: termix-data
+  n8n_data:
+    name: n8n-data
+  hermes_data:
+    name: hermes-data
