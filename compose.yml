@@ -169,18 +169,6 @@ services:
       authentik-redis:
         condition: service_healthy
 
-  portainer:
-    image: portainer/portainer-ce:2.45.0
-    container_name: portainer
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - portainer_data:/data
-    ports:
-      - "8110:9000"
-
   termix:
     image: ghcr.io/lukegus/termix:latest
     container_name: termix
@@ -270,8 +258,6 @@ volumes:
     name: authentik-media
   authentik_templates:
     name: authentik-templates
-  portainer_data:
-    name: portainer-data
   termix_data:
     name: termix-data
   n8n_data:
