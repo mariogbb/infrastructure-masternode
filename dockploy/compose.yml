@@ -1,6 +1,6 @@
 services:
   dockploy:
-    image: luisnquin/dockploy:latest
+    image: dockploy/dockploy:latest
     container_name: dockploy
     restart: unless-stopped
     ports:
